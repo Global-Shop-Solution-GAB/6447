@@ -1,0 +1,124 @@
+Program.Sub.Preflight.Start
+Program.Sub.Preflight.End
+' Export payroll file for iSolve
+' Customer: Airprofan
+' July 2021, Nam Le
+
+' hook: 15290
+' tables: V_TIME_ATTENDANCE
+'		  PYRL_LABOR_XFER
+' File format:
+' 	1. KEY (EMPID)
+' 	2. Date (Date in/out) 
+'	3. Time (Time in/out)
+'	4. Type (Normal/Break/Meal) (removed)
+'	5. Mode (Auto/In/Out)
+
+
+Program.Sub.Main.Start
+f.Intrinsic.Control.Try
+
+f.Intrinsic.Control.CallSub(GetData)
+f.Intrinsic.Control.CallSub(ExportFile)
+
+f.Intrinsic.Control.Catch
+	f.Intrinsic.Control.CallSub(Catching)
+f.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+program.Sub.GetData.Start
+f.Intrinsic.Control.Try
+
+	v.Local.sBegDate.Declare(String)
+	v.Local.sEndDate.Declare(String)
+	v.Local.sTime.Declare(String)
+	v.Local.sType.Declare(String)
+	v.Local.sSQL.Declare(String)
+	v.Local.dDate.Declare(String)
+	v.Local.lCounter.Declare(Long)
+	v.Local.sTime24.Declare(String)
+	v.Local.lHourTemp.Declare(Long)
+	v.Local.sHour.Declare(String)
+	v.Local.sMinute.Declare(String)
+	v.Local.sTimeTemp.Declare(String)
+	v.Local.sAMPM.Declare(String)
+	
+	
+	f.Intrinsic.String.Left(Variable.Passed.BEGDATE,8,v.Local.sBegDate)
+'	f.Intrinsic.String.Mid(Variable.Passed.888888,9,6,v.Local.sTime)
+	
+	f.Intrinsic.Date.ConvertDString(v.Local.sBegDate, "YYYYMMDD", v.Local.dDate)
+	f.Intrinsic.String.Format(v.Local.dDate, "YYYY-MM-DD", v.Local.sBegDate)
+
+	f.Intrinsic.Date.DateAdd("D", 6, v.Local.dDate, v.Local.dDate)
+	f.Intrinsic.String.Format(v.Local.dDate, "YYYY-MM-DD", v.Local.sEndDate)
+
+
+	f.ODBC.Connection!Con.OpenCompanyConnection
+	
+	f.Intrinsic.String.Build("select EMPLOYEE EMPID, LEFT(DATE_IN,10) DDate, LEFT(TIME_IN,5) TTime, 'IN' MODE from V_TIME_ATTENDANCE where DATE_IN between '{0}' and '{1}'", v.Local.sBegDate, v.Local.sEndDate, v.Local.sSQL)
+	
+	f.Intrinsic.Control.If(v.DataTable.dtTimeIn.Exists)
+		f.Data.DataTable.Close("dtTimeIn")
+	f.Intrinsic.Control.EndIf
+	
+	f.Data.DataTable.CreateFromSQL("dtTimeIn", "Con", v.Local.sSQL, True)
+	
+	f.Intrinsic.String.Build("select EMPLOYEE EMPID, LEFT(DATE_OUT,10) DDate, LEFT(TIME_OUT,5) TTime, 'OUT' MODE from V_TIME_ATTENDANCE where DATE_IN between '{0}' and '{1}' and DATE_OUT between '{0}' and '{1}'", v.Local.sBegDate, v.Local.sEndDate, v.Local.sSQL)
+	
+	f.Intrinsic.Control.If(v.DataTable.dtTimeOut.Exists)
+		f.Data.DataTable.Close("dtTimeOut")
+	f.Intrinsic.Control.EndIf
+	
+	f.Data.DataTable.CreateFromSQL("dtTimeOut", "Con", v.Local.sSQL, True)
+	
+	f.Data.DataTable.Merge("dtTimeIn", "dtTimeOut", True, 2)
+	
+	f.Data.DataView.Create("dtTimeOut", "dvPayroll")
+	f.Data.DataView.SetSort("dtTimeOut", "dvPayroll", "EMPID,DDate,TTime")
+	
+	f.ODBC.Connection!Con.Close
+	
+f.Intrinsic.Control.Catch
+	f.Intrinsic.Control.CallSub(Catching)
+f.Intrinsic.Control.EndTry
+program.Sub.GetData.End
+
+program.Sub.ExportFile.Start
+f.Intrinsic.Control.Try
+	v.Local.sContents.Declare(String)
+	v.Local.sFileName.Declare(String)
+	v.Local.bExt.Declare(Boolean)
+	
+	F.Intrinsic.UI.ShowSaveFileDialog("", "xlsx", "LABORTOPAYROLL", "Labor to payroll Export", V.Local.sFileName)
+	
+	f.Data.DataView.ToString("dtTimeOut", "dvPayroll", "EMPID*!*DDATE*!*TTime*!*MODE", "*!*", "$!$", v.Local.sContents)
+	
+	f.Intrinsic.String.Build("Key*!*Date*!*Time*!*Mode$!${0}", v.Local.sContents, v.Local.sContents)
+	
+	'excel format
+'	F.Intrinsic.String.Replace(V.Local.sContents, "$!$0", "$!$'0", V.Local.sContents)
+'	F.Intrinsic.String.Replace(V.Local.sContents, "*0*", "**", V.Local.sContents)
+
+	F.Intrinsic.String.Replace(V.Local.sContents, "*!*", ",", V.Local.sContents)
+	F.Intrinsic.String.Replace(V.Local.sContents, "$!$", V.Ambient.NewLine, V.Local.sContents)
+	
+	f.Intrinsic.String.IsInString(v.Local.sFileName, ".csv", true, v.Local.bExt)
+	f.Intrinsic.Control.If(v.Local.bExt,=, false)
+		f.Intrinsic.String.Build("{0}.csv", v.Local.sFileName, v.Local.sFileName)
+	f.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.File.String2File(V.Local.sFileName, V.Local.sContents)
+
+f.Intrinsic.Control.Catch
+	f.Intrinsic.Control.CallSub(Catching)
+f.Intrinsic.Control.EndTry
+program.Sub.ExportFile.End
+
+program.Sub.Catching.Start
+
+v.Local.sError.Declare(String)
+f.Intrinsic.String.Build("{0}:{1}", v.Ambient.ErrorNumber, v.Ambient.ErrorDescription, v.Local.sError)
+f.Intrinsic.UI.Msgbox(v.Local.sError)
+
+program.Sub.Catching.End
